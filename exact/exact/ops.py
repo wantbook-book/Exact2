@@ -164,17 +164,22 @@ class qlinear(Function):
         else:
             if config.kept_frac < 1.0 and rp:
                 kept_acts = int(config.kept_frac * input.shape[1] + 0.999)
-                dim_reduced_input, randmat = input2rp(input, kept_acts)
+                # dim_reduced_input, randmat = input2rp(input, kept_acts)
+                dim_reduced_input, rm_size, seed = low_mem_input2rp(input, kept_acts)
                 ori_input_shape, proj_input_shape = input.shape, dim_reduced_input.shape
             else:
-                dim_reduced_input, randmat = input, None
+                # dim_reduced_input, randmat = input, None
+                dim_reduced_input, randmat, seed, rm_size = input, None, None, None
                 ori_input_shape, proj_input_shape = input.shape, input.shape
             quantized = quantize_activation(dim_reduced_input, scheme)
 
         empty_cache(config.empty_cache_threshold)
 
         ctx.scheme = scheme
-        ctx.saved = quantized, weight, bias, randmat
+        # ctx.saved = quantized, weight, bias, randmat
+        ctx.saved = quantized, weight, bias
+        ctx.seed = seed
+        ctx.rm_size = rm_size
         ctx.other_args = ori_input_shape, proj_input_shape, rp
         res = F.linear(input, weight, bias)
         return res
@@ -182,11 +187,13 @@ class qlinear(Function):
     @staticmethod
     @custom_bwd
     def backward(ctx, grad_output):
-        quantized, weight, bias, randmat = ctx.saved
+        # quantized, weight, bias, randmat = ctx.saved
+        quantized, weight, bias = ctx.saved
         ori_input_shape, q_input_shape, rp = ctx.other_args
         input = dequantize_activation(quantized, q_input_shape)
         if config.kept_frac < 1.0 and rp:
-            input = rp2input(input, ori_input_shape, randmat)
+            # input = rp2input(input, ori_input_shape, randmat)
+            input = low_mem_rp2input(input, ori_input_shape, ctx.seed, ctx.rm_size)
         del quantized, ctx.saved
         empty_cache(config.empty_cache_threshold)
         grad_input, grad_weight, grad_bias = ext_backward_func.linear_backward(grad_output, input, weight, bias)
@@ -295,15 +302,20 @@ class qspmm_sum(Function):
         else:
             if config.kept_frac < 1.0:
                 kept_acts = int(config.kept_frac * other.shape[1] + 0.999)
-                dim_reduced_input, randmat = input2rp(other, kept_acts)
+                # dim_reduced_input, randmat = input2rp(other, kept_acts)
+                dim_reduced_input, rm_size, seed = low_mem_input2rp(other, kept_acts)
                 ori_input_shape, proj_input_shape = other.shape, dim_reduced_input.shape
             else:
-                dim_reduced_input, randmat = other, None
+                # dim_reduced_input, randmat = other, None
+                dim_reduced_input, randmat, seed, rm_size = other, None, None, None
                 ori_input_shape, proj_input_shape = other.shape, other.shape
             quantized = quantize_activation(dim_reduced_input, scheme)
         
         empty_cache(config.empty_cache_threshold)
-        ctx.saved = row, rowptr, col, value, colptr, csr2csc, quantized, randmat
+        # ctx.saved = row, rowptr, col, value, colptr, csr2csc, quantized, randmat
+        ctx.saved = row, rowptr, col, value, colptr, csr2csc, quantized
+        ctx.seed = seed
+        ctx.rm_size = rm_size
         ctx.other_args = has_value, ori_input_shape, proj_input_shape, value.requires_grad if has_value else False, other.requires_grad
         ctx.scheme = scheme
         return result
@@ -312,7 +324,8 @@ class qspmm_sum(Function):
     @staticmethod
     @custom_bwd
     def backward(ctx, grad_outputs):
-        row, rowptr, col, value, colptr, csr2csc, quantized, randmat = ctx.saved
+        # row, rowptr, col, value, colptr, csr2csc, quantized, randmat = ctx.saved
+        row, rowptr, col, value, colptr, csr2csc, quantized = ctx.saved
         row = col if row is None else row
         value = col if value is None else value
         colptr = col if colptr is None else colptr
@@ -320,7 +333,8 @@ class qspmm_sum(Function):
         has_value, ori_input_shape, q_input_shape, value_requires_grad, mat_requires_grad = ctx.other_args
         other = dequantize_activation(quantized, q_input_shape)
         if config.kept_frac < 1.0:
-            other = rp2input(other, ori_input_shape, randmat)
+            # other = rp2input(other, ori_input_shape, randmat)
+            other = low_mem_rp2input(other, ori_input_shape, ctx.seed, ctx.rm_size)
         del quantized, ctx.saved
         empty_cache(config.empty_cache_threshold)
         grad_value, grad_mat = spmm.spmm_sum_bw(row, rowptr, col, value, colptr, csr2csc, other, grad_outputs, 
@@ -349,14 +363,20 @@ class qspmm_mean(Function):
         else:
             if config.kept_frac < 1.0:
                 kept_acts = int(config.kept_frac * other.shape[1] + 0.999)
-                dim_reduced_input, randmat = input2rp(other, kept_acts)
+                # dim_reduced_input, randmat = input2rp(other, kept_acts)
+                dim_reduced_input, rm_size, seed = low_mem_input2rp(other, kept_acts)
                 ori_input_shape, proj_input_shape = other.shape, dim_reduced_input.shape
             else:
-                dim_reduced_input, randmat = other, None
+                # dim_reduced_input, randmat = other, None
+                dim_reduced_input, randmat, seed, rm_size = other, None, None, None
                 ori_input_shape, proj_input_shape = other.shape, other.shape
             quantized = quantize_activation(dim_reduced_input, scheme)
         empty_cache(config.empty_cache_threshold)
-        ctx.saved = row, rowptr, col, value, rowcount, colptr, csr2csc, quantized, randmat
+        # ctx.saved = row, rowptr, col, value, rowcount, colptr, csr2csc, quantized, randmat
+        ctx.saved = row, rowptr, col, value, rowcount, colptr, csr2csc, quantized
+        ctx.seed = seed
+        ctx.rm_size = rm_size
+
         ctx.other_args = has_value, ori_input_shape, proj_input_shape, value.requires_grad if has_value else False, other.requires_grad
         ctx.scheme = scheme
         return result
@@ -364,7 +384,8 @@ class qspmm_mean(Function):
     @staticmethod
     @custom_bwd
     def backward(ctx, grad_outputs):
-        row, rowptr, col, value, rowcount, colptr, csr2csc, quantized, randmat = ctx.saved
+        # row, rowptr, col, value, rowcount, colptr, csr2csc, quantized, randmat = ctx.saved
+        row, rowptr, col, value, rowcount, colptr, csr2csc, quantized = ctx.saved
         row = col if row is None else row
         value = col if value is None else value
         rowcount = col if rowcount is None else rowcount
@@ -378,7 +399,8 @@ class qspmm_mean(Function):
         if value_requires_grad:
             other = dequantize_activation(quantized, q_input_shape)
             if config.kept_frac < 1.0:
-                other = rp2input(other, ori_input_shape, randmat)
+                # other = rp2input(other, ori_input_shape, randmat)
+                other = low_mem_rp2input(other, ori_input_shape, ctx.seed, ctx.rm_size)
         else:
             if quantized[2].dtype == torch.bfloat16:
                 dtype = torch.float
