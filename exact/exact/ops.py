@@ -1,6 +1,6 @@
 import pdb
 import numpy as np
-
+import time
 import torch
 import torch.nn.functional as F
 from torch.autograd.function import Function
@@ -121,6 +121,29 @@ def input2rp(input, kept_acts):
 @torch.no_grad()
 def rp2input(dim_reduced_input, input_shape, rand_matrix):
     assert len(dim_reduced_input.size()) == 2
+    input = torch.matmul(dim_reduced_input, rand_matrix.t())    
+    return input.view(input_shape)
+
+@torch.no_grad()
+def seed_gen_rad_mat(rm_size, feat_size, device, dtype, seed):
+    torch.cuda.manual_seed(seed)
+    bern = torch.randint(2, size=rm_size, device=device, requires_grad=False, dtype=dtype)
+    return (2.0 * bern - 1) / feat_size **0.5
+@torch.no_grad()
+def low_mem_input2rp(input, kept_acts):
+    assert len(input.size()) == 2
+    rand_mat_size = (input.shape[1], kept_acts)
+    # Create random matrix
+    seed = int(time.time()*1000)
+    rand_matrix = seed_gen_rad_mat(rand_mat_size, kept_acts, input.device, input.dtype, seed)
+    dim_reduced_input = torch.matmul(input, rand_matrix)
+    return dim_reduced_input, rand_mat_size, seed
+
+
+@torch.no_grad()
+def low_mem_rp2input(dim_reduced_input, input_shape, seed, rm_size):
+    assert len(dim_reduced_input.size()) == 2
+    rand_matrix = seed_gen_rad_mat(rm_size, rm_size[1], dim_reduced_input.device, dim_reduced_input.dtype, seed)
     input = torch.matmul(dim_reduced_input, rand_matrix.t())    
     return input.view(input_shape)
 
