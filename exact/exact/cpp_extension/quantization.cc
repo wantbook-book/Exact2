@@ -24,6 +24,8 @@ Tensor unpack_single_precision_cuda(
 std::pair<Tensor, Tensor> act_quantized_relu_forward_cuda(Tensor data);
 Tensor act_quantized_relu_backward_cuda(Tensor grad_output, Tensor mask);
 
+
+
 // ActQuantizedLeakyReLU
 std::pair<Tensor, Tensor> act_quantized_leakyrelu_forward_cuda(Tensor data, float slope);
 Tensor act_quantized_leakyrelu_backward_cuda(Tensor grad_output, Tensor mask, float slope);
@@ -32,6 +34,9 @@ Tensor act_quantized_leakyrelu_backward_cuda(Tensor grad_output, Tensor mask, fl
 std::pair<Tensor, Tensor> act_quantized_dropout_forward_cuda(Tensor data, float p);
 Tensor act_quantized_dropout_backward_cuda(Tensor grad_output, Tensor mask, float p1m);
 
+// LowMemDropout
+std::pair<Tensor, int> low_mem_dropout_forward_cuda(Tensor data, float p);
+Tensor low_mem_dropout_backward_cuda(Tensor grad_output, int seed, float p1m);
 
 // Pack/Unpack
 Tensor pack_single_precision(Tensor data,
@@ -82,6 +87,8 @@ Tensor act_quantized_relu(Tensor input) {
   CHECK_CUDA_TENSOR_FLOAT(input);
   return ActQuantizedReLU::apply(input);
 }
+
+
 
 // Activation quantized leakyrelu: use compressed bit stream to store activation
 class ActQuantizedLeakyReLU : public Function<ActQuantizedLeakyReLU> {
@@ -134,10 +141,40 @@ Tensor act_quantized_dropout(Tensor input, float p, bool train) {
 }
 
 
+// Low Memory dropout: store seed instead of mask
+class LowMemDropout : public Function<LowMemDropout> {
+ public:
+  static Tensor forward(AutogradContext *ctx, Tensor input, float p, bool train) {
+    Tensor output;
+    if (!train){
+      return input;
+    }
+    int seed;
+    std::tie(output, seed) = low_mem_dropout_forward_cuda(input, p);
+    // ctx->save_for_backward({mask});
+    ctx->saved_data["seed"] = seed;
+    ctx->saved_data["p1m"] = 1. - p;
+    return output;
+  }
+
+  static tensor_list backward(AutogradContext *ctx, tensor_list grad_outputs) {
+    // auto saved = ctx->get_saved_variables();
+    float p1m = ctx->saved_data["p1m"].toDouble();
+    int seed = ctx->saved_data["seed"].toInt();
+    return {low_mem_dropout_backward_cuda(grad_outputs[0], seed, p1m), Tensor(), Tensor()};
+  }
+};
+
+Tensor low_mem_dropout(Tensor input, float p, bool train) {
+  CHECK_CUDA_TENSOR_FLOAT(input);
+  return LowMemDropout::apply(input, p, train);
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("pack_single_precision", &pack_single_precision);
   m.def("unpack_single_precision", &unpack_single_precision);
   m.def("act_quantized_relu", &act_quantized_relu);
   m.def("act_quantized_leaky_relu", &act_quantized_leaky_relu);
   m.def("act_quantized_dropout", &act_quantized_dropout);
+  m.def("low_mem_dropout", &low_mem_dropout);
 }
