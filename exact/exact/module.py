@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch import Tensor, device, dtype
 
 from torch_geometric.nn.conv import GCNConv, SAGEConv, GCN2Conv, SGConv
-from .layers import QBatchNorm1d, QLinear, QReLU, QGCNConv, QDropout, QDropout2, QSAGEConv, QGENConv, QGraphConv, QGCN2Conv
+from .layers import QBatchNorm1d, QLinear, QReLU, QGCNConv, QDropout, QDropout2, QSAGEConv, QGENConv, QGraphConv, QGCN2Conv, QLowMemDropout
 from .conf import config
 from .gatconv import CustomGATConv, QCustomGATConv
 
@@ -39,7 +39,8 @@ class QModule(nn.Module):
                 if config.dropout2:
                     setattr(module, name, QDropout2(child.p))
                 else:
-                    setattr(module, name, QDropout(child.p))
+                    # setattr(module, name, QDropout(child.p))
+                    setattr(module, name, QLowMemDropout(child.p))
             elif isinstance(child, GCNConv):
                 setattr(module, name, QGCNConv(child.in_channels, child.out_channels, child.improved, child.cached,
                                                child.add_self_loops, child.normalize, child.bias is not None,

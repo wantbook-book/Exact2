@@ -323,6 +323,16 @@ class QDropout(torch.nn.Module):
             return ext_quantization.act_quantized_dropout(input, self.p, self.training)
         else:
             return F.dropout(input, self.p, self.training)
+class QLowMemDropout(torch.nn.Module):
+    def __init__(self, p):
+        self.p = p
+        super().__init__()
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        if self.training:
+            return ext_quantization.low_mem_dropout(input, self.p, self.training)
+        else:
+            return F.dropout(input, self.p, self.training)
 
 
 class QDropout2(torch.nn.Module):

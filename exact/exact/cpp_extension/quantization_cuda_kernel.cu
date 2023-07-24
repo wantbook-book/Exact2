@@ -599,157 +599,137 @@ Tensor act_quantized_dropout_backward_cuda(Tensor grad_output, Tensor mask, floa
 /********** Low Memory Dropout *******/
 /****************************************/
 #define LOW_MEM_DROPOUT_NUM_THREADS 512
-#define UNROLL 4
-template <typename scalar_t, int ADims, int BDims=ADims>
-__global__ void low_mem_dropout_forward_kernel(at::cuda::detail::TensorInfo<scalar_t, int64_t> a,
-                                                  int32_t* __restrict__ mask,
-                                                  at::cuda::detail::TensorInfo<scalar_t, int64_t> b,
-                                                  std::pair<uint64_t, uint64_t> seeds,
-                                                  int64_t N,
-                                                  int64_t mask_len,
-                                                  float p) {
-  const int64_t id = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
-  const int shared_len = ACT_QUANTIZED_DROPOUT_NUM_THREADS / (sizeof(int32_t) * 8);
-  curandStatePhilox4_32_10_t state;
-  curand_init(seeds.first, id, seeds.second, &state);
-  const int64_t rounded_size = ((N - 1)/(blockDim.x * gridDim.x * UNROLL)+1) * blockDim.x * gridDim.x * UNROLL;
-  float pinv = 1. / (1. - p);
-  __shared__ int mask_shared[shared_len*UNROLL];
-  for (int64_t linearIndex = id;
-       linearIndex < rounded_size;
-       linearIndex += gridDim.x * blockDim.x * UNROLL) {
-       const int64_t global_offset = (int64_t)(blockIdx.x * blockDim.x + linearIndex - id) / (sizeof(int32_t) * 8);
-       int64_t local_offset = (int64_t)blockDim.x * gridDim.x / (sizeof(int32_t) * 8);
-      //curand_uniform_double was pure evil anyway, not doing what it promises, and there's nothing for halfs, so generate float for everything
-       float4 rand = curand_uniform4(&state);
-       scalar_t src[UNROLL];
-       bool inrange[UNROLL] = {0};
-       rand.x = rand.x > p;
-       rand.y = rand.y > p;
-       rand.z = rand.z > p;
-       rand.w = rand.w > p;
-       if (threadIdx.x * 2 < shared_len) {
-        for (int ii = 0; ii < UNROLL; ii++) {
-          reinterpret_cast<int2*>(mask_shared)[threadIdx.x+ii*shared_len/2] = make_int2(0, 0);}
-       }
-       for (int ii = 0; ii < UNROLL; ii++) {
-           int64_t li = linearIndex + blockDim.x * gridDim.x * ii;
-           if (li < N) {
-              // Convert `linearIndex` into an offset of `a`
-               int64_t aOffset =
-                   at::cuda::detail::IndexToOffset<scalar_t, int64_t, ADims>::get(li, a);
-               src[ii] = a.data[aOffset];
-               inrange[ii] = 1;
-           }
-       }
-       for (int ii = 0; ii < UNROLL; ii++) {
-           int64_t li = linearIndex + blockDim.x * gridDim.x * ii;
-           if (li < N) {
-              // Convert `linearIndex` into an offset of `b`
-               const int64_t bOffset =
-                   at::cuda::detail::IndexToOffset<scalar_t, int64_t, BDims>::get(li, b);
-               b.data[bOffset] = src[ii]*(&rand.x)[ii]*pinv;
-           }
-       }
-       __syncthreads();
-      for (int ii = 0; ii < UNROLL; ii++) {
-        bool bit = (&rand.x)[ii];
-        if (inrange[ii]){
-          atomicOr(mask_shared+ii*shared_len+threadIdx.x%shared_len, bit << (threadIdx.x/shared_len));}
-      }
-       __syncthreads();
-      
-      if (threadIdx.x * 2 < shared_len) {
-        for (int ii = 0; ii < UNROLL; ii++){
-          if (inrange[ii]){
-            reinterpret_cast<int2*>(mask)[threadIdx.x+global_offset/2+ii*local_offset/2] = reinterpret_cast<int2*>(mask_shared)[threadIdx.x+ii*shared_len/2];}
-          }
-      }
-  }
+// unroll must be 4 now!!
+// #define UNROLL 4
+template <typename scalar_t, int ADims, int BDims = ADims>
+__global__ void low_mem_dropout_forward_kernel(
+    at::cuda::detail::TensorInfo<scalar_t, int64_t> data_info,
+    at::cuda::detail::TensorInfo<scalar_t, int64_t> output_info,
+    std::pair<uint64_t, uint64_t> seeds,
+    uint64_t N,
+    float p
+){
+    const uint64_t base_id = blockDim.x*blockIdx.x*UNROLL + threadIdx.x;
+    curandStatePhilox4_32_10_t state;
+    curand_init(seeds.first, base_id, seeds.second, &state);
+    float4 rand = curand_uniform4(&state);
+    float pinv = 1. / (1. - p);
+    for(int64_t linearIndex=base_id; linearIndex<N; linearIndex += gridDim.x*blockDim.x*UNROLL){
+        for(int i=0; i<UNROLL; i++){
+            const uint64_t id = linearIndex+i*blockDim.x;
+            if(id < N){
+                const int64_t data_offset = at::cuda::detail::IndexToOffset<scalar_t, int64_t, ADims>::get(id, data_info);
+                const int64_t output_offset = at::cuda::detail::IndexToOffset<scalar_t, int64_t, BDims>::get(id, output_info);
+                scalar_t data = data_info.data[data_offset];
+                scalar_t output = data*((&rand.x)[i]>p)*pinv;
+                output_info.data[output_offset] = output;
+            }
+        }
+    }
+    
+    
 }
 
-std::pair<Tensor, Tensor> low_mem_dropout_forward_cuda(Tensor data, float p) {
-  int64_t n_elements = 1;
-  for (size_t i = 0; i < data.dim(); ++i) {
-    n_elements *= data.size(i);
-  }
+std::pair<Tensor, uint64_t> low_mem_dropout_forward_cuda(Tensor data, float p){
+    uint64_t n_elements = 1;
+    for (size_t i = 0; i < data.dim(); ++i) {
+        n_elements *= data.size(i);
+    }
 
-  auto options = torch::TensorOptions().dtype(torch::kInt32).device(data.device());
-  // int64_t mask_len = (n_elements + sizeof(int32_t) * 8 - 1) / (sizeof(int32_t) * 8);
-  // Tensor mask = torch::empty({mask_len}, options);
-  Tensor output = torch::empty_like(data);
+    auto options = torch::TensorOptions().dtype(torch::kFloat32).device(data.device());
+    Tensor output = torch::empty_like(data, options);
 
-  int64_t block_size = LOW_MEM_DROPOUT_NUM_THREADS;
-  unsigned int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor/block_size;
-  dim3 dim_block(block_size);
-  dim3 grid((n_elements + block_size -1)/block_size);
-  grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * blocks_per_sm, grid.x);
-  
-  int64_t counter_offset = ((n_elements - 1)/(block_size*grid.x*UNROLL)+1)*UNROLL;
-  auto gen = at::check_generator<at::CUDAGeneratorImpl>(at::cuda::detail::getDefaultCUDAGenerator());
-  std::pair<uint64_t, uint64_t> rng_engine_inputs;
-  {
-    // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(gen->mutex_);
-    rng_engine_inputs = gen->philox_engine_inputs(counter_offset);
-  }
-                            
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(data.scalar_type(), "low_mem_dropout_forward", ([&] {
-    auto data_info =
-      at::cuda::detail::getTensorInfo<scalar_t, int64_t>(data);
-    auto output_info =
-      at::cuda::detail::getTensorInfo<scalar_t, int64_t>(output);
-    data_info.collapseDims();
-    output_info.collapseDims();
-    low_mem_dropout_forward_kernel<scalar_t, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-      data_info, mask.data_ptr<int32_t>(), output_info, rng_engine_inputs,
-      n_elements, mask_len, p);
-  }));
+    uint64_t block_size = LOW_MEM_DROPOUT_NUM_THREADS;
+    unsigned int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor/block_size;
+    // unsigned int n_blocks = at::cuda::getCurrentDeviceProperties()->multiProcessorCount * blocks_per_sm;
+    dim3 dim_block(block_size);
+    dim3 grid((n_elements + block_size*UNROLL - 1) / (block_size*UNROLL));
+    grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * blocks_per_sm, grid.x);
+    // uint64_t counter_offset = ((n_elements - 1)/(block_size*grid.x)+1);
+    auto gen = at::check_generator<at::CUDAGeneratorImpl>(at::cuda::detail::getDefaultCUDAGenerator());
+    uint64_t seed = std::chrono::system_clock::now().time_since_epoch().count();//s, enough?
+    gen->set_current_seed(seed);
+    std::pair<uint64_t, uint64_t> rng_engine_inputs;
+    {
+        // See Note [Acquire lock when using random generators]
+        std::lock_guard<std::mutex> lock(gen->mutex_);
+        rng_engine_inputs = gen->philox_engine_inputs(n_elements);
+    }
+    
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(data.scalar_type(), "low_mem_dropout_forward", ([&] {
+        auto data_info = at::cuda::detail::getTensorInfo<scalar_t, int64_t>(data);
+        auto output_info = at::cuda::detail::getTensorInfo<scalar_t, int64_t>(output);
+        data_info.collapseDims();
+        output_info.collapseDims();
+        low_mem_dropout_forward_kernel<scalar_t, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+            data_info, output_info,
+            rng_engine_inputs,
+            n_elements, p);
+    }));
+    return std::make_pair(output, seed);
 
-  return std::make_pair(output, mask);
+}
+template <typename scalar_t, int ADims, int BDims = ADims>
+__global__ void low_mem_dropout_backward_kernel(
+    at::cuda::detail::TensorInfo<scalar_t, int64_t> grad_input_info,
+    at::cuda::detail::TensorInfo<scalar_t, int64_t> grad_output_info,
+    std::pair<uint64_t, uint64_t> seeds,
+    uint64_t N,
+    float p
+){
+    const uint64_t base_id = blockDim.x*blockIdx.x*UNROLL + threadIdx.x;
+    curandStatePhilox4_32_10_t state;
+    curand_init(seeds.first, base_id, seeds.second, &state);
+    float4 rand = curand_uniform4(&state);
+    float p1m = 1. - p;
+    for(int64_t linearIndex=base_id; linearIndex<N; linearIndex += gridDim.x*blockDim.x*UNROLL){
+        for(int i=0; i<UNROLL; i++){
+            const uint64_t id = linearIndex+i*blockDim.x;
+            if(id < N){
+                const int64_t grad_input_offset = at::cuda::detail::IndexToOffset<scalar_t, int64_t, ADims>::get(id, grad_input_info);
+                const int64_t grad_output_offset = at::cuda::detail::IndexToOffset<scalar_t, int64_t, BDims>::get(id, grad_output_info);
+                scalar_t grad_output = grad_output_info.data[grad_output_offset];
+                scalar_t grad_input = grad_output*((&rand.x)[i]>p)/p1m;
+                grad_input_info.data[grad_input_offset] = grad_input;
+            }
+        }
+    }
 }
 
+Tensor low_mem_dropout_backward_cuda(Tensor grad_output, uint64_t seed, float p){
+    uint64_t n_elements = 1;
+    for (size_t i = 0; i < grad_output.dim(); ++i) {
+        n_elements *= grad_output.size(i);
+    }
+    auto options = torch::TensorOptions().dtype(torch::kFloat32).device(grad_output.device());
+    Tensor grad_input = torch::empty_like(grad_output, options);
 
-template <typename scalar_t>
-__global__ void low_mem_dropout_backward_kernel(const scalar_t* __restrict__ grad_output,
-                                                   int32_t* __restrict__ mask,
-                                                   scalar_t* __restrict__ grad_input,
-                                                   int N,
-                                                   float p1m) {
-  int64_t id = (int64_t)blockIdx.x * blockDim.x + threadIdx.x;
-  const int shared_len = ACT_QUANTIZED_DROPOUT_NUM_THREADS / (sizeof(int32_t) * 8);
+    uint64_t block_size = LOW_MEM_DROPOUT_NUM_THREADS;
+    unsigned int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor/block_size;
+    dim3 dim_block(block_size);
+    dim3 grid((n_elements + block_size*UNROLL -1)/(block_size*UNROLL));
+    grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * blocks_per_sm, grid.x);
 
-   for (int64_t linearIndex = id;
-       linearIndex < N;
-       linearIndex += gridDim.x * blockDim.x) {
-         const int64_t global_offset = (int64_t)(blockIdx.x * blockDim.x+linearIndex-id) / (sizeof(int32_t) * 8);
-         bool bit =  (mask[global_offset + threadIdx.x % shared_len] >> (threadIdx.x / shared_len)) & 1;
-         if (bit){
-           grad_input[linearIndex] = grad_output[linearIndex] / p1m;
-         }else{
-           grad_input[linearIndex] = 0.0;
-         }
-  }
-}
+    auto gen = at::check_generator<at::CUDAGeneratorImpl>(at::cuda::detail::getDefaultCUDAGenerator());
+    gen->set_current_seed(seed);
+    std::pair<uint64_t, uint64_t> rng_engine_inputs;
+    {
+        // See Note [Acquire lock when using random generators]
+        std::lock_guard<std::mutex> lock(gen->mutex_);
+        rng_engine_inputs = gen->philox_engine_inputs(n_elements);
+    }
+    
 
-
-Tensor low_mem_dropout_backward_cuda(Tensor grad_output, int seed, float p1m) {
-  int64_t n_elements = 1;
-  for (size_t i = 0; i < grad_output.dim(); ++i) {
-    n_elements *= grad_output.size(i);
-  }
-
-  Tensor grad_input = torch::empty_like(grad_output);
-  int64_t block_size = ACT_QUANTIZED_DROPOUT_NUM_THREADS;
-  unsigned int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor/block_size;
-  dim3 dim_block(block_size);
-  dim3 grid((n_elements + block_size -1)/block_size);
-  grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * blocks_per_sm, grid.x);
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_output.scalar_type(), "act_quantized_dropout_backward", ([&] {
-      low_mem_dropout_backward_kernel<scalar_t><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        grad_output.data_ptr<scalar_t>(), mask.data_ptr<int32_t>(), grad_input.data_ptr<scalar_t>(),
-        n_elements, p1m);
-  }));
-  
-  return grad_input;
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_output.scalar_type(), "low_mem_dropout_backward", ([&] {
+        auto grad_output_info = at::cuda::detail::getTensorInfo<scalar_t, int64_t>(grad_output);
+        auto grad_input_info = at::cuda::detail::getTensorInfo<scalar_t, int64_t>(grad_input);
+        grad_input_info.collapseDims();
+        grad_output_info.collapseDims();
+        low_mem_dropout_backward_kernel<scalar_t, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+            grad_input_info, grad_output_info,
+            rng_engine_inputs,
+            n_elements, p
+        );
+    }));
+    return grad_input;
 }

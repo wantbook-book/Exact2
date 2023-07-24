@@ -35,8 +35,8 @@ std::pair<Tensor, Tensor> act_quantized_dropout_forward_cuda(Tensor data, float 
 Tensor act_quantized_dropout_backward_cuda(Tensor grad_output, Tensor mask, float p1m);
 
 // LowMemDropout
-std::pair<Tensor, int> low_mem_dropout_forward_cuda(Tensor data, float p);
-Tensor low_mem_dropout_backward_cuda(Tensor grad_output, int seed, float p1m);
+std::pair<Tensor, uint64_t> low_mem_dropout_forward_cuda(Tensor data, float p);
+Tensor low_mem_dropout_backward_cuda(Tensor grad_output, uint64_t seed, float p);
 
 // Pack/Unpack
 Tensor pack_single_precision(Tensor data,
@@ -153,15 +153,15 @@ class LowMemDropout : public Function<LowMemDropout> {
     std::tie(output, seed) = low_mem_dropout_forward_cuda(input, p);
     // ctx->save_for_backward({mask});
     ctx->saved_data["seed"] = seed;
-    ctx->saved_data["p1m"] = 1. - p;
+    ctx->saved_data["p"] = p;
     return output;
   }
 
   static tensor_list backward(AutogradContext *ctx, tensor_list grad_outputs) {
     // auto saved = ctx->get_saved_variables();
-    float p1m = ctx->saved_data["p1m"].toDouble();
+    float p = ctx->saved_data["p"].toDouble();
     int seed = ctx->saved_data["seed"].toInt();
-    return {low_mem_dropout_backward_cuda(grad_outputs[0], seed, p1m), Tensor(), Tensor()};
+    return {low_mem_dropout_backward_cuda(grad_outputs[0], seed, p), Tensor(), Tensor()};
   }
 };
 
@@ -177,4 +177,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("act_quantized_leaky_relu", &act_quantized_leaky_relu);
   m.def("act_quantized_dropout", &act_quantized_dropout);
   m.def("low_mem_dropout", &low_mem_dropout);
+  m.def("low_mem_dropout_forward_cuda", &low_mem_dropout_forward_cuda);
+  m.def("low_mem_dropout_backward_cuda", &low_mem_dropout_backward_cuda);
 }
