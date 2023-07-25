@@ -1,3 +1,4 @@
+# python arxiv/train_full_batch.py --conf arxiv/conf/triton_gcn.yaml --act_fp --kept_frac 1.0 --runs 3 --debug_mem
 import sys
 import os
 import numpy as np
@@ -318,7 +319,10 @@ def main():
                       f'Test: {100 * test_acc:.2f}%')
 
         logger.print_statistics(run)
-    logger.print_statistics(model_name=args.model, sub_dir_name_prefix=f'arxiv_nbits{args.n_bits}_frac{args.kept_frac}_')
+    logger.print_statistics(
+        base_dir_name=os.path.dirname(__file__),
+        model_name=args.model, 
+        sub_dir_name_prefix=f'nbits{args.n_bits}_frac{args.kept_frac}_')
 
 
 if __name__ == '__main__':

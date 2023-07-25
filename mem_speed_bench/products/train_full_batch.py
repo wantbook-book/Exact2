@@ -274,7 +274,11 @@ def main():
                       f'Test: {100 * test_acc:.2f}%')
 
         logger.print_statistics(run)
-    logger.print_statistics(model_name=args.model, sub_dir_name_prefix=f'products_nbits{args.n_bits}_frac{args.kept_frac}_')
+    logger.print_statistics(
+        base_dir_name=os.path.dirname(__file__),
+        model_name=args.model, 
+        sub_dir_name_prefix=f'nbits{args.n_bits}_frac{args.kept_frac}_')
+    # logger.print_statistics(model_name=args.model, sub_dir_name_prefix=f'products_nbits{args.n_bits}_frac{args.kept_frac}_')
 
 
 if __name__ == '__main__':

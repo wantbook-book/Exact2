@@ -26,7 +26,7 @@ class Logger(object):
         # else:
         #     return False
 
-    def print_statistics(self, run=None, model_name='model_name', sub_dir_name_prefix='sub_dir_name'):
+    def print_statistics(self, run=None, base_dir_name='train_results', model_name='model_name', sub_dir_name_prefix='sub_dir_name'):
         if run is not None:
             result = 100 * torch.tensor(self.results[run])
             argmax = result[:, 1].argmax().item()
@@ -41,7 +41,7 @@ class Logger(object):
 
 
             best_results = []
-            base_dir_name = 'train_results'
+            base_dir_name = os.path.join(base_dir_name, 'train_results')
             if not os.path.exists(base_dir_name):
                 os.mkdir(base_dir_name)
             dir_name = model_name
