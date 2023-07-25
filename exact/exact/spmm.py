@@ -15,7 +15,7 @@ class QMatmul(torch.nn.Module):
         else:
             self.scheme = None
 
-    def forward(self, src, other, quantized=None, randmat=None): 
+    def forward(self, src, other, quantized=None, randmat=None, rm_size=None, seed=None): 
         rowptr, col, value = src.csr()
         has_value = value is not None
         if self.reduce == 'sum':
@@ -29,7 +29,7 @@ class QMatmul(torch.nn.Module):
                 csr2csc = src.storage.csr2csc()
                 colptr = src.storage.colptr()
             return qspmm_sum.apply(row, rowptr, col, value, colptr, csr2csc, has_value, other, 
-                                quantized, randmat, self.scheme)
+                                quantized, randmat, self.scheme, rm_size, seed)
         elif self.reduce == 'mean':
             row = src.storage._row
             rowcount = src.storage._rowcount
@@ -43,11 +43,13 @@ class QMatmul(torch.nn.Module):
                 csr2csc = src.storage.csr2csc()
                 colptr = src.storage.colptr()
             return qspmm_mean.apply(row, rowptr, col, value, rowcount, colptr, csr2csc, has_value, other, 
-                                    quantized, randmat, self.scheme)
+                                    quantized, randmat, self.scheme, rm_size, seed)
         elif self.reduce == 'min':
-            return qspmm_min.apply(rowptr, col, value, has_value, other, quantized, randmat, self.scheme)
+            return qspmm_min.apply(rowptr, col, value, has_value, other, quantized, randmat, self.scheme,
+                                   rm_size, seed)
         elif self.reduce == 'max':
-            return qspmm_max.apply(rowptr, col, value, has_value, other, quantized, randmat, self.scheme)
+            return qspmm_max.apply(rowptr, col, value, has_value, other, quantized, randmat, self.scheme,
+                                   rm_size, seed)
         else:
             raise ValueError
 

@@ -11,7 +11,7 @@ from torch import Tensor
 from torch.nn import Parameter, Sequential
 from torch_scatter import scatter, scatter_softmax
 
-from exact.ops import rp2input, input2rp
+from exact.ops import rp2input, input2rp, low_mem_input2rp, low_mem_rp2input
 import exact.cpp_extension.quantization as ext_quantization
 from .utils import compute_tensor_bytes, get_memory_usage
 from .ops import qlinear, qbatch_norm, qelu, quantize_activation
@@ -153,29 +153,34 @@ class QSAGEConv(SAGEConv):
         if l_eq_r:
             if config.kept_frac < 1.0:
                 kept_acts = int(config.kept_frac * x[0].shape[1] + 0.999)
-                dim_reduced_input, randmat = input2rp(x[0], kept_acts)
+                # dim_reduced_input, randmat = input2rp(x[0], kept_acts)
+                dim_reduced_input, rm_size, seed = low_mem_input2rp(x[0], kept_acts)
             else:
-                dim_reduced_input, randmat = x[0], None
+                # dim_reduced_input, randmat = x[0], None
+                dim_reduced_input, rm_size, seed = x[0], None, None
             quantized = quantize_activation(dim_reduced_input, self.scheme)
         else:
-            quantized, randmat = None, None
+            # quantized, randmat = None, None
+            quantized, rm_size, seed = None, None, None
         # quantized = None
         # propagate_type: (x: OptPairTensor)
-        out = self.propagate(edge_index, x=x, size=size, quantized=quantized, randmat=randmat)
+        # out = self.propagate(edge_index, x=x, size=size, quantized=quantized, randmat=randmat)
+        out = self.propagate(edge_index, x=x, size=size, quantized=quantized, rm_size=rm_size, seed=seed)
         out = self.lin_l(out)
 
         x_r = x[1]
         if self.root_weight and x_r is not None:
-            out += self.lin_r(x_r, quantized, randmat)
+            # out += self.lin_r(x_r, quantized)
+            out += self.lin_r(x_r, quantized, rm_size=rm_size, seed=seed)
 
         if self.normalize:
             out = F.normalize(out, p=2., dim=-1)
 
         return out
 
-    def message_and_aggregate(self, adj_t, x, quantized=None, randmat=None) -> Tensor:
+    def message_and_aggregate(self, adj_t, x, quantized=None, randmat=None, rm_size=None, seed=None) -> Tensor:
         # adj_t = adj_t.set_value(None, layout=None)
-        return self.msg_and_aggr_func(adj_t, x[0], quantized=quantized, randmat=randmat)
+        return self.msg_and_aggr_func(adj_t, x[0], quantized=quantized, randmat=randmat, rm_size=rm_size, seed=seed)
 
 
 class QGraphConv(GraphConv):
@@ -274,9 +279,10 @@ class QLinear(torch.nn.Linear):
             self.scheme = None
         self.rp = rp
 
-    def forward(self, input, quantized=None, randmat=None):
+    def forward(self, input, quantized=None, randmat=None, rm_size=None, seed=None):
         if self.training:
-            return qlinear.apply(input, self.weight, self.bias, quantized, randmat, self.scheme, self.rp)
+            # return qlinear.apply(input, self.weight, self.bias, quantized, randmat, self.scheme, self.rp)
+            return qlinear.apply(input, self.weight, self.bias, quantized, randmat, rm_size, seed, self.scheme, self.rp)
         else:
             return super(QLinear, self).forward(input)
 

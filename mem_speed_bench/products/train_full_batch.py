@@ -1,3 +1,5 @@
+#python ./products/train_full_batch.py --conf ./products/conf/sage.yaml --n_bits $BIT_WIDTH --kept_frac $FRAC
+#python ./products/train_full_batch.py --conf ./products/conf/sage.yaml --n_bits $BIT_WIDTH --kept_frac $FRAC
 import sys
 import os
 
@@ -9,7 +11,7 @@ import time
 import yaml
 import math
 import warnings
-
+    
 import torch
 import torch.nn.functional as F
 import torch.nn.parallel
@@ -272,7 +274,7 @@ def main():
                       f'Test: {100 * test_acc:.2f}%')
 
         logger.print_statistics(run)
-    logger.print_statistics()
+    logger.print_statistics(model_name=args.model, sub_dir_name_prefix=f'products_nbits{args.n_bits}_frac{args.kept_frac}_')
 
 
 if __name__ == '__main__':

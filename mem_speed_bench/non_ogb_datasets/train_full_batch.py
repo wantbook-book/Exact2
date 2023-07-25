@@ -1,3 +1,5 @@
+#python ./non_ogbn_datasets/train_full_batch.py --conf ./non_ogbn_datasets/conf/$MODEL.yaml --n_bits $BIT_WIDTH --kept_frac $FRAC --dataset $DATASET --grad_norm $GRAD_NORM
+# python ./non_ogb_datasets/train_full_batch.py --conf ./non_ogb_datasets/conf/gcn.yaml --act_fp --kept_frac 1.0 --dataset flickr --grad_norm 0.5 --debug_mem
 import sys
 import os
 import numpy as np
@@ -331,7 +333,7 @@ def main():
 
         logger.add_result(run, result)
         logger.print_statistics(run)
-    logger.print_statistics()
+    logger.print_statistics(model_name=args.model, sub_dir_name_prefix=f'{args.dataset}_nbits{args.n_bits}_frac{args.kept_frac}_')
 
 
 if __name__ == '__main__':

@@ -104,8 +104,8 @@ std::pair<Tensor, uint64_t> low_mem_dropout_forward_cuda(Tensor data, float p){
         n_elements *= data.size(i);
     }
 
-    auto options = torch::TensorOptions().dtype(torch::kFloat32).device(data.device());
-    Tensor output = torch::empty_like(data, options);
+    // auto options = torch::TensorOptions().dtype(torch::kFloat32).device(data.device());
+    Tensor output = torch::empty_like(data);
     // options = torch::TensorOptions().dtype(torch::kBool).device(data.device());
     // Tensor mask = torch::zeros_like(data, options);
 
@@ -182,8 +182,9 @@ Tensor low_mem_dropout_backward_cuda(Tensor grad_output, uint64_t seed, float p)
     }
     // std::cout<<"backward"<<std::endl;
     // std::cout<<"n_elements: "<<n_elements<<std::endl;
-    auto options = torch::TensorOptions().dtype(torch::kFloat32).device(grad_output.device());
-    Tensor grad_input = torch::empty_like(grad_output, options);
+    // auto options = torch::TensorOptions().dtype(torch::kFloat32).device(grad_output.device());
+    Tensor grad_input = torch::empty_like(grad_output);
+
     // options = torch::TensorOptions().dtype(torch::kBool).device(grad_output.device());
     // Tensor mask = torch::zeros_like(grad_output, options);
 

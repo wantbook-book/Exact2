@@ -1,3 +1,6 @@
+#python ./products/train_mini_batch.py --conf ./products/conf/cluster_sage.yaml --n_bits $BIT_WIDTH --kept_frac $FRAC
+# python ./products/train_mini_batch.py --conf ./products/conf/cluster_sage.yaml --act_fp --kept_frac 1.0
+#python ./products/train_mini_batch.py --conf ./yaml/conf/$MODEL.yaml --n_bits $BIT_WIDTH --kept_frac $FRAC
 import sys
 import os
 sys.path.append(os.getcwd())
@@ -287,7 +290,7 @@ def main():
 
         logger.add_result(run, result)
         logger.print_statistics(run)
-    logger.print_statistics()
+    logger.print_statistics(model_name=args.model, sub_dir_name_prefix=f'arxiv_nbits{args.n_bits}_frac{args.kept_frac}_')
 
 
 if __name__ == '__main__':

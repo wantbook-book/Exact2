@@ -151,15 +151,17 @@ def low_mem_rp2input(dim_reduced_input, input_shape, seed, rm_size):
 class qlinear(Function):
     @staticmethod
     @custom_fwd(cast_inputs=torch.float16)
-    def forward(ctx, input, weight, bias=None, quantized=None, randmat=None, scheme=None, rp=True):
+    def forward(ctx, input, weight, bias=None, quantized=None, randmat=None, 
+                rm_size=None, seed=None, scheme=None, rp=True):
         if quantized is not None:
-            if randmat is None:
+            if seed is None:
                 assert rp is False or config.kept_frac == 1.0
                 # quantized somewhere before
                 ori_input_shape, proj_input_shape = input.shape, input.shape
             else:
-                assert (rp is True and config.kept_frac < 1.0) and (input.shape[1] == randmat.shape[0])
-                ori_input_shape, proj_input_shape = input.shape, torch.Size([input.shape[0], randmat.shape[1]])
+                assert (rp is True and config.kept_frac < 1.0) and (input.shape[1] == rm_size[0])
+                # ori_input_shape, proj_input_shape = input.shape, torch.Size([input.shape[0], randmat.shape[1]])
+                ori_input_shape, proj_input_shape = input.shape, torch.Size([input.shape[0], rm_size[1]])
                 # this is quantized random projected data
         else:
             if config.kept_frac < 1.0 and rp:
@@ -205,7 +207,7 @@ class qlinear(Function):
         #     grad_bias = None
         del input, grad_output
         empty_cache(config.empty_cache_threshold)
-        return grad_input, grad_weight, grad_bias, None, None, None, None
+        return grad_input, grad_weight, grad_bias, None, None, None, None, None, None
 
 
 
@@ -288,16 +290,21 @@ class qspmm_sum(Function):
 
     @staticmethod
     @custom_fwd(cast_inputs=torch.float16)
-    def forward(ctx, row, rowptr, col, value, colptr, csr2csc, has_value, other, quantized=None, randmat=None, scheme=None):
+    def forward(ctx, row, rowptr, col, value, colptr, csr2csc, has_value, other, 
+                quantized=None, randmat=None, scheme=None, rm_size=None, seed=None):
         result = spmm.spmm_sum_fw(row, rowptr, col, value, colptr, csr2csc, other)
         if quantized is not None:
-            if randmat is None:
+            # if randmat is None:
+            if seed is None:
                 assert config.kept_frac == 1.0
                 # quantized somewhere before
                 ori_input_shape, proj_input_shape = other.shape, other.shape
             else:
-                assert config.kept_frac < 1.0 and (other.shape[1] == randmat.shape[0])
-                ori_input_shape, proj_input_shape = other.shape, torch.Size([other.shape[0], randmat.shape[1]])
+                # assert config.kept_frac < 1.0 and (other.shape[1] == randmat.shape[0])
+                assert config.kept_frac < 1.0 and (other.shape[1] == rm_size[0])
+
+                # ori_input_shape, proj_input_shape = other.shape, torch.Size([other.shape[0], randmat.shape[1]])
+                ori_input_shape, proj_input_shape = other.shape, torch.Size([other.shape[0], rm_size[1]])
                 # this is quantized random projected data
         else:
             if config.kept_frac < 1.0:
@@ -341,7 +348,7 @@ class qspmm_sum(Function):
                                                 has_value, value_requires_grad, mat_requires_grad)
         del other
         empty_cache(config.empty_cache_threshold)
-        return None, None, None, grad_value, None, None, None, grad_mat, None, None, None
+        return None, None, None, grad_value, None, None, None, grad_mat, None, None, None, None, None
 
 
 class qspmm_mean(Function):
@@ -349,16 +356,19 @@ class qspmm_mean(Function):
     @staticmethod
     @custom_fwd(cast_inputs=torch.float16)
     def forward(ctx, row, rowptr, col, value, rowcount, colptr, csr2csc, has_value, other, 
-                quantized=None, randmat=None, scheme=None):
+                quantized=None, randmat=None, scheme=None, rm_size=None, seed=None):
         result = spmm.spmm_mean_fw(row, rowptr, col, value, rowcount, colptr, csr2csc, other)
+        # breakpoint()
         if quantized is not None:
-            if randmat is None:
+            if seed is None:
                 assert config.kept_frac == 1.0
                 # quantized somewhere before without random projection
                 ori_input_shape, proj_input_shape = other.shape, other.shape
             else:
-                assert config.kept_frac < 1.0 and (other.shape[1] == randmat.shape[0])
-                ori_input_shape, proj_input_shape = other.shape, torch.Size([other.shape[0], randmat.shape[1]])
+                # assert config.kept_frac < 1.0 and (other.shape[1] == randmat.shape[0])
+                assert config.kept_frac < 1.0 and (other.shape[1] == rm_size[0])
+                # ori_input_shape, proj_input_shape = other.shape, torch.Size([other.shape[0], randmat.shape[1]])
+                ori_input_shape, proj_input_shape = other.shape, torch.Size([other.shape[0], rm_size[1]])
                 # this is quantized random projected data
         else:
             if config.kept_frac < 1.0:
@@ -413,7 +423,7 @@ class qspmm_mean(Function):
                                                  has_value, value_requires_grad, mat_requires_grad)
         del other
         empty_cache(config.empty_cache_threshold)
-        return None, None, None, grad_value, None, None, None, None, grad_mat, None, None, None
+        return None, None, None, grad_value, None, None, None, None, grad_mat, None, None, None, None, None
 
 
 class qspmm_max(Function):
@@ -421,7 +431,7 @@ class qspmm_max(Function):
     @staticmethod
     @custom_fwd(cast_inputs=torch.float16)
     def forward(ctx, rowptr, col, value, has_value, other, 
-                quantized=None, randmat=None, scheme=None):
+                quantized=None, randmat=None, scheme=None, rm_size=None, seed=None):
         output, arg_out = spmm.spmm_max_fw(rowptr, col, value, other)
         if quantized is None:
             quantized = quantize_activation(other, scheme)
@@ -445,14 +455,14 @@ class qspmm_max(Function):
         empty_cache(config.empty_cache_threshold)
         grad_value, grad_mat = spmm.spmm_max_bw(col, value, other, arg_out, grad_outputs, 
                                                 has_value, value_requires_grad, mat_requires_grad)
-        return None, None, grad_value, None, grad_mat, None, None, None
+        return None, None, grad_value, None, grad_mat, None, None, None, None, None
 
 
 class qspmm_min(Function):
     @staticmethod
     @custom_fwd(cast_inputs=torch.float16)
     def forward(ctx, rowptr, col, value, has_value, other, 
-                quantized=None, randmat=None, scheme=None):
+                quantized=None, randmat=None, scheme=None, rm_size=None, seed=None):
         output, arg_out =  spmm.spmm_min_fw(rowptr, col, value, other)
         if quantized is None:
             quantized = quantize_activation(other, scheme)
@@ -478,4 +488,4 @@ class qspmm_min(Function):
         #     ctx.scheme.set_scale(grad_outputs)
         grad_value, grad_mat = spmm.spmm_min_bw(col, value, other, arg_out, grad_outputs, 
                                                 has_value, value_requires_grad, mat_requires_grad)
-        return None, None, grad_value, None, grad_mat, None, None, None
+        return None, None, grad_value, None, grad_mat, None, None, None, None, None
