@@ -257,7 +257,7 @@ def main():
         print(res)
         loss.backward()
         optimizer.step()
-        print(f'after backward, max allocated mem (MB): %.3f' % ((bwd_peak_compute+before_backward)/MB))
+        # print(f'after backward, max allocated mem (MB): %.3f' % ((bwd_peak_compute+before_backward)/MB))
         del loss, out
         print("========== After Backward ===========")
         after_backward = get_memory_usage(args.gpu, True)
