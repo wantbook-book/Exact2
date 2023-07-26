@@ -331,7 +331,11 @@ def main():
 
         logger.add_result(run, result)
         logger.print_statistics(run)
-    logger.print_statistics()
+    # logger.print_statistics()
+    logger.print_statistics(
+        base_dir_name=os.path.dirname(__file__),
+        model_name=args.model, 
+        sub_dir_name_prefix=f'{args.dataset}_nbits{args.n_bits}_frac{args.kept_frac}_')
 
 
 if __name__ == '__main__':

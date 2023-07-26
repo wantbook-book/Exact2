@@ -1,6 +1,6 @@
 import sys
 import os
-
+import numpy as np
 from torch.autograd import grad
 sys.path.append(os.getcwd())
 import argparse
@@ -239,6 +239,7 @@ def main():
         exp_recorder.record("network", 'SAGE')
         exp_recorder.record("model_only", usage / MB, 2)    
         print("========== Load data to GPU ===========")
+        avg_act_mem = []
         for _data in loader:     
             optimizer.zero_grad()
             _data = T.ToSparseTensor()(_data.to('cuda'))
@@ -270,7 +271,23 @@ def main():
             print(res)
             exp_recorder.record("total", total_mem / MB, 2)
             exp_recorder.record("activation", act_mem / MB, 2)
-            exit()
+        print('Avg Act Mem:', np.mean(avg_act_mem   ) / MB)
+        torch.cuda.synchronize()
+        s_time = time.time()
+        if args.test_speed:
+            model.reset_parameters()
+            optimizer.zero_grad()
+            epoch_per_sec = []
+            for i in range(20):
+                t = time.time()
+                loss = train(model, loader, optimizer, loss_op, args.grad_norm)
+                duration = time.time() - t
+                epoch_per_sec.append(duration)
+                print(f'epoch {i}, duration: {duration} sec')
+            print(f's/epoch: {np.mean(epoch_per_sec)}')
+            torch.cuda.synchronize()
+            print(f'epoch/s: {20/(time.time() - s_time) }')
+        exit()
 
     logger = Logger(args.runs, args)
     eval_start_epoch = model_config['eval_start_epoch']
