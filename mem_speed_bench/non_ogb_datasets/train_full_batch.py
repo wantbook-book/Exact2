@@ -189,7 +189,7 @@ def main():
 
     torch.cuda.set_device(args.gpu)
     data, num_features, num_classes = get_data(args.root, args.dataset)
-
+    # breakpoint()
     GNN = getattr(models, model_config['arch_name'])
     model = GNN(in_channels=num_features, out_channels=num_classes, **model_config['architecture'])
     if use_qmodule:
@@ -259,7 +259,7 @@ def main():
         print(res)
         loss.backward()
         optimizer.step()
-        print(f'after backward, max allocated mem (MB): %.3f' % ((bwd_peak_compute+before_backward)/MB))
+        # print(f'after backward, max allocated mem (MB): %.3f' % ((bwd_peak_compute+before_backward)/MB))
         del loss, out
         print("========== After Backward ===========")
         after_backward = get_memory_usage(args.gpu, True)
@@ -333,7 +333,11 @@ def main():
 
         logger.add_result(run, result)
         logger.print_statistics(run)
-    logger.print_statistics(model_name=args.model, sub_dir_name_prefix=f'{args.dataset}_nbits{args.n_bits}_frac{args.kept_frac}_')
+    logger.print_statistics(
+        base_dir_name=os.path.dirname(__file__),
+        model_name=args.model, 
+        sub_dir_name_prefix=f'{args.dataset}_nbits{args.n_bits}_frac{args.kept_frac}_')
+    # logger.print_statistics(model_name=args.model, sub_dir_name_prefix=f'{args.dataset}_nbits{args.n_bits}_frac{args.kept_frac}_')
 
 
 if __name__ == '__main__':

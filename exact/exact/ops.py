@@ -127,6 +127,7 @@ def rp2input(dim_reduced_input, input_shape, rand_matrix):
 @torch.no_grad()
 def seed_gen_rad_mat(rm_size, feat_size, device, dtype, seed):
     torch.cuda.manual_seed(seed)
+    torch.manual_seed(seed)
     bern = torch.randint(2, size=rm_size, device=device, requires_grad=False, dtype=dtype)
     return (2.0 * bern - 1) / feat_size **0.5
 @torch.no_grad()
