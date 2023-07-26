@@ -630,7 +630,7 @@ __global__ void low_mem_dropout_forward_kernel(
     
 }
 
-std::pair<Tensor, uint64_t> low_mem_dropout_forward_cuda(Tensor data, float p){
+std::pair<Tensor, int64_t> low_mem_dropout_forward_cuda(Tensor data, float p){
     uint64_t n_elements = 1;
     for (size_t i = 0; i < data.dim(); ++i) {
         n_elements *= data.size(i);
@@ -647,7 +647,7 @@ std::pair<Tensor, uint64_t> low_mem_dropout_forward_cuda(Tensor data, float p){
     grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * blocks_per_sm, grid.x);
     // uint64_t counter_offset = ((n_elements - 1)/(block_size*grid.x)+1);
     auto gen = at::check_generator<at::CUDAGeneratorImpl>(at::cuda::detail::getDefaultCUDAGenerator());
-    uint64_t seed = std::chrono::system_clock::now().time_since_epoch().count();//s, enough?
+    int64_t seed = std::chrono::system_clock::now().time_since_epoch().count();//s, enough?
     gen->set_current_seed(seed);
     std::pair<uint64_t, uint64_t> rng_engine_inputs;
     {
@@ -696,7 +696,7 @@ __global__ void low_mem_dropout_backward_kernel(
     }
 }
 
-Tensor low_mem_dropout_backward_cuda(Tensor grad_output, uint64_t seed, float p){
+Tensor low_mem_dropout_backward_cuda(Tensor grad_output, int64_t seed, float p){
     uint64_t n_elements = 1;
     for (size_t i = 0; i < grad_output.dim(); ++i) {
         n_elements *= grad_output.size(i);

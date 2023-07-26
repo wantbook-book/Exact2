@@ -35,8 +35,8 @@ std::pair<Tensor, Tensor> act_quantized_dropout_forward_cuda(Tensor data, float 
 Tensor act_quantized_dropout_backward_cuda(Tensor grad_output, Tensor mask, float p1m);
 
 // LowMemDropout
-std::pair<Tensor, uint64_t> low_mem_dropout_forward_cuda(Tensor data, float p);
-Tensor low_mem_dropout_backward_cuda(Tensor grad_output, uint64_t seed, float p);
+std::pair<Tensor, int64_t> low_mem_dropout_forward_cuda(Tensor data, float p);
+Tensor low_mem_dropout_backward_cuda(Tensor grad_output, int64_t seed, float p);
 
 // Pack/Unpack
 Tensor pack_single_precision(Tensor data,
@@ -149,7 +149,7 @@ class LowMemDropout : public Function<LowMemDropout> {
     if (!train){
       return input;
     }
-    int seed;
+    int64_t seed;
     std::tie(output, seed) = low_mem_dropout_forward_cuda(input, p);
     // ctx->save_for_backward({mask});
     ctx->saved_data["seed"] = seed;
@@ -160,7 +160,7 @@ class LowMemDropout : public Function<LowMemDropout> {
   static tensor_list backward(AutogradContext *ctx, tensor_list grad_outputs) {
     // auto saved = ctx->get_saved_variables();
     float p = ctx->saved_data["p"].toDouble();
-    int seed = ctx->saved_data["seed"].toInt();
+    int64_t seed = ctx->saved_data["seed"].toInt();
     return {low_mem_dropout_backward_cuda(grad_outputs[0], seed, p), Tensor(), Tensor()};
   }
 };

@@ -255,6 +255,7 @@ def main():
             print("========== Before Backward ===========")
             before_backward = get_memory_usage(args.gpu, True)
             act_mem = get_memory_usage(args.gpu, False) - init_mem - compute_tensor_bytes([loss, out])
+            avg_act_mem.append(act_mem)
             res = "Total Mem: %.2f MB\tData Mem: %.2f MB\tAct Mem: %.2f MB" % (before_backward / MB,
                                                                             data_mem,
                                                                             act_mem / MB)
@@ -271,7 +272,7 @@ def main():
             print(res)
             exp_recorder.record("total", total_mem / MB, 2)
             exp_recorder.record("activation", act_mem / MB, 2)
-        print('Avg Act Mem:', np.mean(avg_act_mem   ) / MB)
+        print('Avg Act Mem:', np.mean(avg_act_mem) / MB)
         torch.cuda.synchronize()
         s_time = time.time()
         if args.test_speed:
@@ -314,8 +315,11 @@ def main():
 
         logger.add_result(run, result)
         logger.print_statistics(run)
-    logger.print_statistics()
-
+    # logger.print_statistics()
+    logger.print_statistics(
+        base_dir_name=os.path.dirname(__file__),
+        model_name=args.model, 
+        sub_dir_name_prefix=f'mini_{args.dataset}_nbits{args.n_bits}_frac{args.kept_frac}_')
 
 if __name__ == '__main__':
     main()
